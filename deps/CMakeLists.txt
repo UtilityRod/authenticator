@@ -1,2 +1,2 @@
 add_subdirectory(networking)
-add_subdirectory(dstruct)
+add_subdirectory(eloop)

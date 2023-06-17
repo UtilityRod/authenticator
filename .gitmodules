@@ -1,6 +1,6 @@
 [submodule "deps/networking"]
 	path = deps/networking
 	url = git@github.com:UtilityRod/networking.git
-[submodule "deps/dstruct"]
-	path = deps/dstruct
-	url = git@github.com:UtilityRod/dstruct.git
+[submodule "deps/eloop"]
+	path = deps/eloop
+	url = git@github.com:UtilityRod/event_loop.git
