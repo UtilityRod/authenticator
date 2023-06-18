@@ -10,4 +10,5 @@ set(
 )
 
 add_executable(authenticator_main ${SOURCES})
+target_compile_options(authenticator_main PUBLIC "-g")
 target_link_libraries(authenticator_main PUBLIC networking_shared eloop_static)
