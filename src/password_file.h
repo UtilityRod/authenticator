@@ -4,6 +4,8 @@
 #include <openssl/evp.h>
 
 #define SALT_LEN 6
+#define MAX_USERNAME_SZ 10
+#define MAX_PASSWORD_SZ 20
 
 typedef enum {
     ADMIN,

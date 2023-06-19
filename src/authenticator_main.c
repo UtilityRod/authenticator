@@ -3,14 +3,17 @@
 #include <eloop.h>
 #include <unistd.h>
 #include <tcp_server.h>
+#include <tcp_operations.h>
 #include <semaphore.h>
+#include <signal.h>
+#include <stdint.h>
 
 #include "password_file.h"
 
-#define STR(x) #x
 #define ROOTUSER "root"
 #define ROOTPASS "toor"
-#define USAGE "Usage: ./authenticator_main [password file]"
+#define USAGE "Usage: ./authenticator_main [password file] [port]\n"
+#define AUTH_HEADER_SZ sizeof(uint8_t) * 2
 
 typedef struct {
     eloop_t * eloop;
@@ -23,8 +26,15 @@ static int passwd_setup_event(event_t * event);
 static int tcp_setup_event(event_t * event);
 static void handle_connections(authenticator_t * auth);
 
+static void establish_handler(int sig, void (*func)(int));
+static void signal_handler(int sig);
+
+volatile sig_atomic_t teardown_server = 0; 
+
 int main(int argc, char ** argv)
 {
+    establish_handler(SIGINT, signal_handler);
+
     int rv = -1;
 
     if (argc != 3)
@@ -113,16 +123,124 @@ tcp_setup_return:
     return rv;
 }
 
+static int client_connect_event(event_t * event)
+{
+    int rv = -1;
+    int * client = (int *)event->data;
+
+    uint8_t auth_header[AUTH_HEADER_SZ];
+    memset(auth_header, 0, AUTH_HEADER_SZ);
+
+    int nread = tcp_read_all(*client, auth_header, AUTH_HEADER_SZ);
+
+    if (nread != AUTH_HEADER_SZ)
+    {
+        goto cleanup;
+    }
+
+    uint8_t * tmp_ptr = auth_header;
+    uint8_t username_sz = *tmp_ptr++;
+    uint8_t password_sz = *tmp_ptr;
+
+    if (username_sz >= MAX_USERNAME_SZ || password_sz >= MAX_PASSWORD_SZ)
+    {
+        fputs("ERROR: username or password is too long\n", stderr);
+        goto cleanup;
+    }
+
+    int userpass_sz = username_sz + password_sz;
+    char * userpass = calloc(userpass_sz + 2, sizeof(*userpass));
+
+    if (!userpass)
+    {
+        goto cleanup;
+    }
+
+    nread = tcp_read_all(*client, userpass, userpass_sz);
+
+    if (nread != userpass_sz)
+    {
+        goto cleanup;
+    }
+
+    char * username = userpass;
+    char * password = userpass + username_sz;
+    memmove(password + 1, password, password_sz);
+    *password = '\0';
+    password++;
+
+cleanup:
+    free(userpass);
+    close(*client);
+    free(event->data);
+    event->data = NULL;
+    event->efunc = NULL;
+    free(event);
+    rv = 0;
+    return rv;
+}
+
 static void handle_connections(authenticator_t * auth)
 {
-    for (;;)
+    while (!teardown_server)
     {
         int client_fd = tcp_server_accept(auth->server);
-        printf("Client connected\n");
-        close(client_fd);
-        break;
+
+        if (client_fd == -1)
+        {
+            continue;
+        }
+
+        event_t * connect_event = calloc(1, sizeof(*connect_event));
+
+        if (!connect_event)
+        {
+            close(client_fd);
+            continue;
+        }
+
+        int * event_fd = calloc(1, sizeof(*event_fd));
+
+        if (!event_fd)
+        {
+            close(client_fd);
+            free(connect_event);
+            continue;
+        }
+
+        *event_fd = client_fd;
+        connect_event->data = event_fd;
+        connect_event->efunc = client_connect_event;
+        eloop_add(auth->eloop, connect_event);
     }
 
     return;
+}
+
+static void establish_handler(int sig, void (*func)(int))
+{
+    int rv = 0;
+    struct sigaction sa = {
+        .sa_handler = func
+    };
+
+    if (sigaction(sig, &sa, NULL) == -1)
+    {
+        fputs("ERROR: failed to set sigation\n", stderr);
+        exit(-1);
+    }
+}
+
+static void signal_handler(int sig)
+{
+    switch(sig)
+    {
+        case SIGINT:
+            teardown_server = 1;
+            break;
+        default:
+            fputs("ERROR: unknown signal has been captured\n", stderr);
+            break;
+    }
 }
 // END OF SOURCE
